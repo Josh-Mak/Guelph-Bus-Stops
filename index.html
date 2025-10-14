@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guelph Bus Stops and Neighbourhoods</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .glass-morphism {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+        }
+        
+        .control-card {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            box-shadow: 0 4px 16px 0 rgba(31, 38, 135, 0.1);
+        }
+        
+        .map-container {
+            height: 100%;
+            width: 100%;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 100%;
+            width: 100%;
+        }
+        
+        .factor-select {
+            transition: all 0.3s ease;
+        }
+        
+        .factor-select:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .leaflet-popup-content {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        .legend {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            margin-right: 8px;
+        }
+        
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            border-radius: 12px;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #667eea;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+    </style>
+</head>
+<body>
+    <div class="flex flex-col h-screen">
+        <!-- Header -->
+        <header class="glass-morphism p-4 m-4">
+            <h1 class="text-3xl font-bold text-gray-800 flex items-center">
+                <i class="fas fa-map-marked-alt mr-3 text-purple-600"></i>
+                Guelph Bus Stops and Neighbourhoods
+            </h1>
+            <p class="text-gray-600 mt-2">Explore the relationship between bus stop coverage and demographic factors in Guelph</p>
+        </header>
+        
+        <!-- Control Panel -->
+        <div class="control-card p-4 mx-4 mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        <i class="fas fa-bus mr-2 text-blue-500"></i>Bus Stop Factor
+                    </label>
+                    <select id="busStopFactor" class="factor-select w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <option value="stops_km2">Bus Stops/Km²</option>
+                        <option value="Percent_400m_Buffer">5m Walk Coverage (%)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        <i class="fas fa-users mr-2 text-purple-500"></i>Demographic Factor
+                    </label>
+                    <select id="demographicFactor" class="factor-select w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                        <option value="Pop_Dens">Population Density</option>
+                        <option value="Low_Inc_Pcnt">% Low Income</option>
+                        <option value="Unemployment_Rate">Unemployment Rate</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 px-4 pb-4 overflow-hidden">
+            <!-- Map Panel -->
+            <div class="glass-morphism p-4 flex flex-col">
+                <h2 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="fas fa-map mr-2 text-green-500"></i>
+                    Interactive Map
+                </h2>
+                <div class="flex-1 relative">
+                    <div id="map" class="map-container"></div>
+                    <div id="mapLoading" class="loading-overlay">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Scatterplot Panel -->
+            <div class="glass-morphism p-4 flex flex-col">
+                <h2 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="fas fa-chart-scatter mr-2 text-orange-500"></i>
+                    Correlation Analysis
+                </h2>
+                <div class="flex-1 relative">
+                    <div class="chart-container">
+                        <canvas id="scatterChart"></canvas>
+                    </div>
+                    <div id="chartLoading" class="loading-overlay">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script>
+        // Global variables for data
+        let neighborhoodData = null;
+        let busStopData = null;
+        
+        // Store references to layers
+        let neighborhoodLayer;
+        let busStopLayer;
+        let scatterChart;
+        let map;
+        let mapLegend = null; // Reference to the map legend
+        let highlightedLayer = null; // Reference to the currently highlighted layer
+        
+        // Color schemes for different neighborhood types
+        const typeColors = {
+            'Residential': '#4ade80',
+            'Industrial - Commercial': '#60a5fa',
+            'Institutional': '#f472b6',
+            'Greenfield': '#fb923c',
+        };
+        
+        // Function to fetch GeoJSON data
+        async function fetchGeoJSON(url) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error(`Error fetching ${url}:`, error);
+                document.getElementById('errorMessage').textContent = `Error loading data: ${error.message}`;
+                document.getElementById('errorContainer').classList.remove('hidden');
+                return null;
+            }
+        }
+        
+        // Function to initialize the application
+        async function initializeApp() {
+            // Show loading indicators
+            document.getElementById('mapLoading').style.display = 'flex';
+            document.getElementById('chartLoading').style.display = 'flex';
+            
+            // Fetch data from files
+            neighborhoodData = await fetchGeoJSON('Guelph_Neighbourhoods_Bus_Stop_Census_Features.geojson');
+            busStopData = await fetchGeoJSON('Guelph_Bus_Stops.geojson');
+            
+            // If data loading failed, show error and stop
+            if (!neighborhoodData || !busStopData) {
+                document.getElementById('mapLoading').style.display = 'none';
+                document.getElementById('chartLoading').style.display = 'none';
+                return;
+            }
+            
+            // Initialize map
+            map = L.map('map').setView([43.5448, -80.2482], 12); // Centered on Guelph
+            
+            // Add tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            
+            // Update visualizations
+            updateMap();
+            
+            // Hide loading indicators
+            document.getElementById('mapLoading').style.display = 'none';
+            document.getElementById('chartLoading').style.display = 'none';
+        }
+        
+        // Function to get color based on value and range
+        function getColor(value, min, max) {
+            const ratio = (value - min) / (max - min);
+            const r = Math.floor(255 * ratio);
+            const b = Math.floor(255 * (1 - ratio));
+            return `rgb(${r}, 100, ${b})`;
+        }
+        
+        // Function to get the display name of a factor
+        function getFactorDisplayName(factor) {
+            switch(factor) {
+                case 'stops_km2':
+                    return 'Bus Stops per Km²';
+                case 'Percent_400m_Buffer':
+                    return '5m Walk Coverage (%)';
+                case 'Pop_Dens':
+                    return 'Population Density';
+                case 'Low_Inc_Pcnt':
+                    return '% Low Income';
+                case 'Unemployment_Rate':
+                    return 'Unemployment Rate';
+                default:
+                    return factor;
+            }
+        }
+        
+        // Function to highlight a neighborhood on the map
+        function highlightNeighborhood(neighborhoodName) {
+            // Reset any previously highlighted layer
+            if (highlightedLayer) {
+                neighborhoodLayer.resetStyle(highlightedLayer);
+                highlightedLayer = null;
+            }
+            
+            // Find and highlight the new layer
+            neighborhoodLayer.eachLayer(function(layer) {
+                if (layer.feature.properties.Name === neighborhoodName) {
+                    highlightedLayer = layer;
+                    layer.setStyle({
+                        weight: 4,
+                        opacity: 1,
+                        color: '#ffe100',
+                        dashArray: '',
+                        fillOpacity: 0.9
+                    });
+                    layer.bringToFront();
+                }
+            });
+        }
+        
+        // Function to reset any highlighted neighborhood
+        function resetHighlight() {
+            if (highlightedLayer) {
+                neighborhoodLayer.resetStyle(highlightedLayer);
+                highlightedLayer = null;
+            }
+            if (busStopLayer) {
+                busStopLayer.bringToFront();
+            }
+        }
+        
+        // Function to update map visualization
+        function updateMap() {
+            if (!neighborhoodData || !busStopData || !map) return;
+            
+            const busStopFactor = document.getElementById('busStopFactor').value;
+            const demographicFactor = document.getElementById('demographicFactor').value;
+            
+            // Clear existing layers
+            if (neighborhoodLayer) {
+                map.removeLayer(neighborhoodLayer);
+            }
+            if (busStopLayer) {
+                map.removeLayer(busStopLayer);
+            }
+            
+            // Reset highlighted layer reference
+            highlightedLayer = null;
+            
+            // Remove existing legend if it exists
+            if (mapLegend) {
+                map.removeControl(mapLegend);
+                mapLegend = null;
+            }
+            
+            // Get min and max values for demographic factor
+            const demographicValues = neighborhoodData.features.map(f => f.properties[demographicFactor]);
+            const minDemographic = Math.min(...demographicValues);
+            const maxDemographic = Math.max(...demographicValues);
+            
+            // Add neighborhoods to map
+            neighborhoodLayer = L.geoJSON(neighborhoodData, {
+                style: function(feature) {
+                    return {
+                        fillColor: getColor(feature.properties[demographicFactor], minDemographic, maxDemographic),
+                        weight: 2,
+                        opacity: 1,
+                        color: 'white',
+                        dashArray: '3',
+                        fillOpacity: 0.7
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    const busStopValue = feature.properties[busStopFactor];
+                    const demographicValue = feature.properties[demographicFactor];
+                    
+                    // Format the display values
+                    const busStopDisplay = busStopFactor === 'stops_km2' 
+                        ? `${busStopValue.toFixed(2)} stops/km²`
+                        : `${busStopValue.toFixed(1)}% coverage`;
+                    
+                    const demographicDisplay = demographicFactor === 'Pop_Dens'
+                        ? `${demographicValue.toFixed(1)} people/km²`
+                        : `${(demographicValue * 100).toFixed(1)}%`;
+                    
+                    const popupContent = `
+                        <div class="p-2">
+                            <h3 class="font-bold text-lg mb-2">${feature.properties.Name}</h3>
+                            <p class="mb-1"><strong>Type:</strong> ${feature.properties.Type}</p>
+                            <p class="mb-1"><strong>${getFactorDisplayName(busStopFactor)}:</strong> ${busStopDisplay}</p>
+                            <p class="mb-1"><strong>${getFactorDisplayName(demographicFactor)}:</strong> ${demographicDisplay}</p>
+                        </div>
+                    `;
+                    
+                    layer.bindPopup(popupContent);
+                }
+            }).addTo(map);
+            
+            // Add bus stops to map
+            busStopLayer = L.geoJSON(busStopData, {
+                pointToLayer: function(feature, latlng) {
+                    return L.circleMarker(latlng, {
+                        radius: 5,
+                        fillColor: "#ff7800",
+                        color: "#000",
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    });
+                },
+                onEachFeature: function(feature, layer) {
+                    layer.bindPopup(`
+                        <div class="p-2">
+                            <h3 class="font-bold">${feature.properties.StopName}</h3>
+                            <p><strong>Stop ID:</strong> ${feature.properties.StopId}</p>
+                        </div>
+                    `);
+                }
+            }).addTo(map);
+            
+            // Add legend
+            mapLegend = L.control({ position: 'bottomright' });
+            mapLegend.onAdd = function(map) {
+               const div = L.DomUtil.create('div', 'legend');
+               const labels = [];
+               const numRanges = 5;
+               const grades = [];
+               
+               // Add title with the actual demographic factor name
+               div.innerHTML = `<h4 class="font-bold mb-2">${getFactorDisplayName(demographicFactor)}</h4>`;
+               
+               // Calculate the break points for our ranges based on min/max values
+               for (let i = 0; i <= numRanges; i++) {
+                   grades.push(minDemographic + (maxDemographic - minDemographic) * (i / numRanges));
+               }
+               
+               // Helper function to format numbers consistently
+               const formatNumber = (num) => {
+                   return demographicFactor === 'Pop_Dens'
+                       ? num.toFixed(1) // Format as a plain number for population density
+                       : `${(num * 100).toFixed(1)}%`; // Format as a percentage for other factors
+               };
+
+               // Loop through the break points to create a label for each range
+               for (let i = 0; i < numRanges; i++) {
+                   const from = grades[i];
+                   const to = grades[i + 1];
+                   const color = getColor(from, minDemographic, maxDemographic); // Color corresponds to the start of the range
+
+                   let rangeLabel;
+                   const fromFormatted = formatNumber(from);
+                   const toFormatted = formatNumber(to);
+
+                   // Create a different label format for the first, last, and middle ranges
+                   if (i === 0) {
+                       // First range, e.g., "< 100.0%"
+                       rangeLabel = `&lt; ${toFormatted}`;
+                   } else if (i === numRanges - 1) {
+                       // Last range, e.g., "> 300.0%"
+                       rangeLabel = `&gt; ${fromFormatted}`;
+                   } else {
+                       // Intermediate ranges, e.g., "100.0 – 200.0%"
+                       const fromCleaned = demographicFactor === 'Pop_Dens' ? fromFormatted : fromFormatted.replace('%', '');
+                       rangeLabel = `${fromCleaned} &ndash; ${toFormatted}`;
+                   }
+                   
+                   labels.push(
+                       `<div class="legend-item">
+                            <span class="legend-color" style="background-color: ${color}"></span>
+                            <span>${rangeLabel}</span>
+                        </div>`
+                   );
+               }
+               
+               div.innerHTML += labels.join('');
+               
+               return div;
+            };
+            mapLegend.addTo(map);
+            
+            // Update scatterplot
+            updateScatterplot();
+        }
+        
+        // Function to calculate line of best fit
+        function calculateLineOfBestFit(data) {
+            const n = data.length;
+            let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+            
+            for (const point of data) {
+                sumX += point.x;
+                sumY += point.y;
+                sumXY += point.x * point.y;
+                sumX2 += point.x * point.x;
+            }
+            
+            const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+            const intercept = (sumY - slope * sumX) / n;
+            
+            // Calculate R-squared
+            let sumYTotal = 0, sumYResidual = 0;
+            const meanY = sumY / n;
+            
+            for (const point of data) {
+                const predictedY = slope * point.x + intercept;
+                sumYTotal += Math.pow(point.y - meanY, 2);
+                sumYResidual += Math.pow(point.y - predictedY, 2);
+            }
+            
+            const rSquared = 1 - (sumYResidual / sumYTotal);
+            
+            return { slope, intercept, rSquared };
+        }
+        
+        // Function to update scatterplot
+        function updateScatterplot() {
+            if (!neighborhoodData) return;
+            
+            const busStopFactor = document.getElementById('busStopFactor').value;
+            const demographicFactor = document.getElementById('demographicFactor').value;
+            
+            // Prepare data for scatterplot
+            const scatterData = neighborhoodData.features.map(feature => {
+                return {
+                    x: feature.properties[demographicFactor],
+                    y: feature.properties[busStopFactor],
+                    name: feature.properties.Name,
+                    type: feature.properties.Type
+                };
+            });
+            
+            // Group data by type
+            const datasets = {};
+            for (const type in typeColors) {
+                datasets[type] = {
+                    label: type,
+                    data: [],
+                    backgroundColor: typeColors[type],
+                    borderColor: typeColors[type],
+                    borderWidth: 1,
+                    pointRadius: 6,
+                    pointHoverRadius: 8
+                };
+            }
+            
+            // Add data points to appropriate datasets
+            for (const point of scatterData) {
+                if (datasets[point.type]) {
+                    datasets[point.type].data.push({
+                        x: point.x,
+                        y: point.y,
+                        name: point.name
+                    });
+                }
+            }
+            
+            // Calculate line of best fit
+            const lineOfBestFit = calculateLineOfBestFit(scatterData);
+            
+            // Create line of best fit data
+            const minX = Math.min(...scatterData.map(p => p.x));
+            const maxX = Math.max(...scatterData.map(p => p.x));
+            
+            const lineData = [
+                { x: minX, y: lineOfBestFit.slope * minX + lineOfBestFit.intercept },
+                { x: maxX, y: lineOfBestFit.slope * maxX + lineOfBestFit.intercept }
+            ];
+            
+            // Destroy existing chart if it exists
+            if (scatterChart) {
+                scatterChart.destroy();
+            }
+            
+            // Create new chart
+            const ctx = document.getElementById('scatterChart').getContext('2d');
+            scatterChart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [
+                        ...Object.values(datasets),
+                        {
+                            label: `Line of Best Fit (R² = ${lineOfBestFit.rSquared.toFixed(3)})`,
+                            data: lineData,
+                            type: 'line',
+                            borderColor: 'rgba(255, 99, 132, 0.8)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.label.includes('Line of Best Fit')) {
+                                        return context.dataset.label;
+                                    }
+                                    
+                                    const busStopDisplay = busStopFactor === 'stops_km2' 
+                                        ? `${context.parsed.y.toFixed(2)} stops/km²`
+                                        : `${context.parsed.y.toFixed(1)}% coverage`;
+                                    
+                                    const demographicDisplay = demographicFactor === 'Pop_Dens'
+                                        ? `${context.parsed.x.toFixed(1)} people/km²`
+                                        : `${(context.parsed.x * 100).toFixed(1)}%`;
+                                    
+                                    return [
+                                        context.raw.name,
+                                        `${getFactorDisplayName(busStopFactor)}: ${busStopDisplay}`,
+                                        `${getFactorDisplayName(demographicFactor)}: ${demographicDisplay}`
+                                    ];
+                                }
+                            }
+                        },
+                        legend: {
+                            position: 'top',
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: getFactorDisplayName(demographicFactor)
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: getFactorDisplayName(busStopFactor)
+                            }
+                        }
+                    },
+                    onHover: (event, activeElements) => {
+                        if (activeElements.length > 0) {
+                            const element = activeElements[0];
+                            const datasetIndex = element.datasetIndex;
+                            const index = element.index;
+                            const dataset = scatterChart.data.datasets[datasetIndex];
+                            const point = dataset.data[index];
+                            
+                            if (point.name) {
+                                highlightNeighborhood(point.name);
+                            }
+                        } else {
+                            resetHighlight();
+                        }
+                    },
+                    onClick: (event, elements) => {
+                        if (elements.length > 0) {
+                            const element = elements[0];
+                            const datasetIndex = element.datasetIndex;
+                            const index = element.index;
+                            const dataset = scatterChart.data.datasets[datasetIndex];
+                            const point = dataset.data[index];
+                            
+                            if (point.name) {
+                                // Find the neighborhood in the data
+                                const neighborhood = neighborhoodData.features.find(
+                                    f => f.properties.Name === point.name
+                                );
+                                
+                                if (neighborhood) {
+                                    // Center map on this neighborhood
+                                    const bounds = L.geoJSON(neighborhood).getBounds();
+                                    map.fitBounds(bounds);
+                                    
+                                    // Open popup for this neighborhood
+                                    neighborhoodLayer.eachLayer(layer => {
+                                        if (layer.feature.properties.Name === point.name) {
+                                            layer.openPopup();
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Event listeners for factor selection
+        document.getElementById('busStopFactor').addEventListener('change', updateMap);
+        document.getElementById('demographicFactor').addEventListener('change', updateMap);
+        
+        // Initialize the application when the page loads
+        window.addEventListener('load', initializeApp);
+    </script>
+</body>
+</html>
